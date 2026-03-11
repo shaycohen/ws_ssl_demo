@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ws-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ws-demo
+  template:
+    metadata:
+      labels:
+        app: ws-demo
+    spec:
+      containers:
+        - name: app
+          image: gsrrelease/ws_test
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"

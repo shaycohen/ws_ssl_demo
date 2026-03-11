@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WS Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: monospace; background: #1a1a1a; color: #e0e0e0; padding: 20px; }
+    h1 { margin-bottom: 20px; font-size: 1.4em; color: #fff; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    section { background: #2a2a2a; border-radius: 6px; padding: 16px; }
+    h2 { font-size: 1em; margin-bottom: 12px; color: #aaa; }
+    .status { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.8em; margin-bottom: 10px; }
+    .status.ok { background: #1a4a1a; color: #4caf50; }
+    .status.err { background: #4a1a1a; color: #f44336; }
+    .status.idle { background: #333; color: #888; }
+    label { display: block; font-size: 0.8em; color: #888; margin-bottom: 4px; }
+    input, select { width: 100%; padding: 6px 8px; background: #333; border: 1px solid #444; color: #e0e0e0; border-radius: 4px; font-family: monospace; font-size: 0.9em; margin-bottom: 8px; }
+    button { padding: 6px 14px; border: none; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 0.85em; margin-right: 6px; margin-bottom: 6px; }
+    .btn-primary { background: #2962ff; color: #fff; }
+    .btn-secondary { background: #444; color: #e0e0e0; }
+    .btn-danger { background: #b71c1c; color: #fff; }
+    .log { background: #111; border-radius: 4px; padding: 10px; height: 260px; overflow-y: auto; font-size: 0.78em; line-height: 1.6; }
+    .log .entry { border-bottom: 1px solid #1e1e1e; padding: 2px 0; }
+    .log .ts { color: #555; margin-right: 6px; }
+    .log .rx { color: #4caf50; }
+    .log .tx { color: #2196f3; }
+    .log .sys { color: #ff9800; }
+    .log .err { color: #f44336; }
+    .cfg { background: #2a2a2a; border-radius: 6px; padding: 16px; margin-bottom: 20px; display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; }
+    .cfg > div { flex: 1; min-width: 160px; }
+    .cfg label { display: block; font-size: 0.8em; color: #888; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <h1>WebSocket + HTTP Demo</h1>
+
+  <div class="cfg">
+    <div>
+      <label>WS scheme</label>
+      <select id="wsScheme">
+        <option value="ws">ws://</option>
+        <option value="wss">wss://</option>
+      </select>
+    </div>
+    <div>
+      <label>Host</label>
+      <input id="wsHost" value="" placeholder="auto-detect" />
+    </div>
+    <div>
+      <label>WS path</label>
+      <input id="wsPath" value="/ws" />
+    </div>
+    <div>
+      <label>HTTP base</label>
+      <input id="httpBase" value="" placeholder="auto-detect" />
+    </div>
+  </div>
+
+  <div class="grid">
+    <section>
+      <h2>WebSocket</h2>
+      <span id="wsStatus" class="status idle">disconnected</span><br>
+      <button class="btn-primary" onclick="wsConnect()">Connect</button>
+      <button class="btn-danger" onclick="wsDisconnect()">Disconnect</button>
+      <br><br>
+      <label>Send message</label>
+      <input id="wsMsg" placeholder='{"hello":"world"}' />
+      <button class="btn-secondary" onclick="wsSend()">Send</button>
+      <div class="log" id="wsLog"></div>
+    </section>
+
+    <section>
+      <h2>HTTP</h2>
+      <span id="httpStatus" class="status idle">idle</span><br>
+      <button class="btn-primary" onclick="httpPing()">GET /api/ping</button>
+      <button class="btn-secondary" onclick="httpHealth()">GET /health</button>
+      <br><br>
+      <div class="log" id="httpLog"></div>
+    </section>
+  </div>
+
+  <script>
+    let ws = null;
+
+    function now() {
+      return new Date().toTimeString().slice(0, 8);
+    }
+
+    function appendLog(logId, cls, text) {
+      const log = document.getElementById(logId);
+      const entry = document.createElement('div');
+      entry.className = 'entry';
+      entry.innerHTML = `<span class="ts">${now()}</span><span class="${cls}">${escHtml(text)}</span>`;
+      log.appendChild(entry);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function getWsUrl() {
+      const scheme = document.getElementById('wsScheme').value;
+      const host = document.getElementById('wsHost').value || window.location.host;
+      const path = document.getElementById('wsPath').value || '/ws';
+      return `${scheme}://${host}${path}`;
+    }
+
+    function getHttpBase() {
+      return document.getElementById('httpBase').value ||
+        `${window.location.protocol}//${window.location.host}`;
+    }
+
+    function setWsStatus(text, cls) {
+      const el = document.getElementById('wsStatus');
+      el.textContent = text;
+      el.className = `status ${cls}`;
+    }
+
+    function wsConnect() {
+      if (ws) ws.close();
+      const url = getWsUrl();
+      appendLog('wsLog', 'sys', `Connecting to ${url}`);
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        setWsStatus('connected', 'ok');
+        appendLog('wsLog', 'sys', 'Connected');
+      };
+      ws.onmessage = (e) => {
+        appendLog('wsLog', 'rx', `RX: ${e.data}`);
+      };
+      ws.onerror = (e) => {
+        appendLog('wsLog', 'err', 'Error (see console)');
+        setWsStatus('error', 'err');
+      };
+      ws.onclose = (e) => {
+        setWsStatus('disconnected', 'idle');
+        appendLog('wsLog', 'sys', `Closed (code ${e.code})`);
+        ws = null;
+      };
+    }
+
+    function wsDisconnect() {
+      if (ws) ws.close();
+    }
+
+    function wsSend() {
+      const msg = document.getElementById('wsMsg').value;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        appendLog('wsLog', 'err', 'Not connected');
+        return;
+      }
+      ws.send(msg);
+      appendLog('wsLog', 'tx', `TX: ${msg}`);
+    }
+
+    async function httpFetch(path) {
+      const url = getHttpBase() + path;
+      const statusEl = document.getElementById('httpStatus');
+      statusEl.textContent = 'loading...';
+      statusEl.className = 'status idle';
+      try {
+        const res = await fetch(url);
+        const body = await res.text();
+        statusEl.textContent = `${res.status}`;
+        statusEl.className = res.ok ? 'status ok' : 'status err';
+        appendLog('httpLog', res.ok ? 'rx' : 'err', `${res.status} ${path} → ${body}`);
+      } catch (e) {
+        statusEl.textContent = 'error';
+        statusEl.className = 'status err';
+        appendLog('httpLog', 'err', `${path} failed: ${e.message}`);
+      }
+    }
+
+    function httpPing() { httpFetch('/api/ping'); }
+    function httpHealth() { httpFetch('/health'); }
+
+    // Auto-detect scheme based on page protocol
+    window.addEventListener('DOMContentLoaded', () => {
+      if (window.location.protocol === 'https:') {
+        document.getElementById('wsScheme').value = 'wss';
+      }
+    });
+
+    // Allow Enter key to send WS message
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('wsMsg').addEventListener('keydown', e => {
+        if (e.key === 'Enter') wsSend();
+      });
+    });
+  </script>
+</body>
+</html>

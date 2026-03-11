@@ -1,0 +1,21 @@
+services:
+  app:
+    image: gsrrelease/ws_test
+    build: ./server
+    environment:
+      PORT: 3000
+    # Expose directly for plain ws:// / http:// testing (no SSL)
+    ports:
+      - "3000:3000"
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./client:/usr/share/nginx/html:ro
+    depends_on:
+      - app
